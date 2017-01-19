@@ -1,4 +1,10 @@
 #include "edge_confidence.h"
+#include "utility.h"
+#include "global.h"
+
+#include "utility/misc.h"
+#include "opencv.h"
+
 
 namespace mf {
 
@@ -19,8 +25,8 @@ ndarray<2, real> edge_confidence(const ndarray_view<2, rgb_color>& epi, std::ptr
 }
 
 
-ndarray<2, uchar> edge_confidence_mask(const ndarray_view<2, real>& conf, real threshold) {
-	ndarray<2, uchar> mask(conf.shape());
+ndarray<2, std::uint8_t> edge_confidence_mask(const ndarray_view<2, real>& conf, real threshold) {
+	ndarray<2, std::uint8_t> mask(conf.shape());
 
 	cv::Mat_<real> conf_cv = to_opencv(conf);
 	cv::Mat_<uchar> mask_cv = to_opencv(mask.view());

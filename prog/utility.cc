@@ -1,4 +1,5 @@
 #include "utility.h"
+#include "io/image_export.h"
 
 namespace mf {
 

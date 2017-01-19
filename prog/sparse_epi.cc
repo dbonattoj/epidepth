@@ -1,4 +1,6 @@
 #include "sparse_epi.h"
+#include "global.h"
+
 #include <algorithm>
 
 namespace mf {

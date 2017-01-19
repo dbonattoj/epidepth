@@ -1,8 +1,10 @@
 #include "disparity_estimation.h"
-
+#include "global.h"
 #include "utility.h"
-#include <vector>
 
+#include "utility/misc.h"
+#include <vector>
+#include <iostream>
 
 namespace mf {
 
@@ -36,12 +38,11 @@ epi_line_disparity_result estimate_epi_line_disparity(
 	std::ptrdiff_t s,
 	const ndarray_view<2, rgb_color>& epi,
 	const ndarray_view<1, real>& conf,
-	const ndarray_view<1, uchar>& mask
+	const ndarray_view<1, std::uint8_t>& mask,
+	const ndarray_view<1, real>& min_disparity,
+	const ndarray_view<1, real>& max_disparity
 ) {
 	epi_line_disparity_result result(u_sz, s);
-
-	const real max_d = 2.0;
-	const real d_incr = 0.01;
 	
 	for(std::ptrdiff_t u = 0; u < u_sz; ++u) {
 		if(! mask[u]) {
@@ -49,12 +50,17 @@ epi_line_disparity_result estimate_epi_line_disparity(
 			result.disparity[u] = NAN;
 			continue;
 		}
-	
+		
+		real d_incr = disparity_increment;
+		real min_d = min_disparity[u], max_d = max_disparity[u];
+		Assert_crit(! std::isnan(min_d));
+		Assert_crit(! std::isnan(max_d));
+		
 		real max_score = 0.0;
 		real avg_score = 0.0;
 		real max_score_d = 0;
 		real n_scores = 0;
-		for(real d = 0.0; d < max_d; d += d_incr) {
+		for(real d = min_d; d < max_d; d += d_incr) {
 			real score = depth_score(epi, s, u, d);
 			avg_score += score;
 			n_scores += 1.0;
