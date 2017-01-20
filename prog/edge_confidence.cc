@@ -31,7 +31,7 @@ ndarray<2, std::uint8_t> edge_confidence_mask(const ndarray_view<2, real>& conf,
 	cv::Mat_<real> conf_cv = to_opencv(conf);
 	cv::Mat_<uchar> mask_cv = to_opencv(mask.view());
 	
-	cv::Mat_<uchar> kernel_cv = cv::Mat_<uchar>::ones(5, 5);
+	cv::Mat_<uchar> kernel_cv = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(3,3));
 	cv::morphologyEx((conf_cv > threshold), mask_cv, cv::MORPH_ERODE, kernel_cv);
 	
 	return mask;

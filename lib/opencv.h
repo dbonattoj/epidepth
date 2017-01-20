@@ -70,7 +70,7 @@ namespace mf {
 /** \a mat is created and allocated as needed using `cv::Mat::create()`, and \a mat owns the new copy of the data.
  ** `Elem` can not be a `masked_elem` type. */
 template<std::size_t Dim, typename Elem>
-void copy_to_opencv(const ndarray_view<Dim, const Elem>& vw, cv::Mat_<Elem>& mat) {
+void copy_to_opencv(const ndarray_view<Dim, Elem>& vw, cv::Mat_<std::remove_const_t<Elem>>& mat) {
 	int sizes[Dim];
 	for(std::ptrdiff_t i = 0; i < Dim; ++i) sizes[i] = vw.shape()[i];
 

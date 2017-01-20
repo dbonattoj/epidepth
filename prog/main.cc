@@ -83,56 +83,6 @@ image<rgb_color> load_image(std::ptrdiff_t s) {
 }
 
 
-
-void scale_down(
-	const ndarray_view<3, real>& previous_epi_disparities, // [v][u][s] with previous size
-	const ndarray_view<3, real>& output_scaled_epi_disparities // [v][u][s] with new (smaller) size
-) {
-	// scale down in u and v directions by factor 2 (downsample images)
-	
-	std::ptrdiff_t scaled_u_sz = u_sz / 2;
-	std::ptrdiff_t scaled_v_sz = v_sz / 2;
-	
-	ndarray<3, rgb_color> scaled_epis(make_ndsize(scaled_v_sz, scaled_u_sz, s_sz));
-	
-	// downsample images
-	#pragma omp parallel for
-	for(std::ptrdiff_t s = 0; s < s_sz; ++s) {
-		ndarray<2, rgb_color> img(epis.slice(s, 2));
-		
-		cv::Mat_<rgb_color> img_cv = to_opencv(img.view());
-		cv::GaussianBlur(img_cv, img_cv, cv::Size(15, 15), 0.0, 0.0, cv::BORDER_DEFAULT);
-		
-		cv::Mat_<rgb_color> scaled_img_cv;
-		cv::resize(img_cv, scaled_img_cv, cv::Size(scaled_u_sz, scaled_v_sz), 0.0, 0.0, cv::INTER_LINEAR);
-		
-		ndarray_view<2, rgb_color> scaled_img = to_ndarray_view<2, rgb_color>(scaled_img_cv);
-		scaled_epis.slice(s, 2) = scaled_img;
-		
-		image_export(make_image_view(scaled_img), "../output/im_"+std::to_string(s)+"b.png");
-	}
-	
-	// update global values, and move in new epis cube
-	scale_down_factor *= 2;
-	u_sz = scaled_u_sz;
-	v_sz = scaled_v_sz;
-	epis = std::move(scaled_epis);
-	epi_shp = make_ndsize(u_sz, s_sz);
-	image_shp = make_ndsize(u_sz, v_sz);
-}
-
-
-void scale_down_epi_disparities(
-	const ndarray_view<3, real>& previous_epi_disparities, // [v][u][s] with previous size
-	const ndarray_view<3, real>& output_scaled_epi_disparities // [v][u][s] with new (smaller) size
-) {
-	// downsample the estimated disparities
-	#pragma omp parallel for
-	for(std::ptrdiff_t v = 0; v < output_scaled_epi_disparities.shape()[0]; ++v)
-		output_scaled_epi_disparities[v] = step(previous_epi_disparities[2*v], 0, 2);
-}
-
-
 void compute_min_max_disparities(
 	const ndarray_view<2, real>& existing_disparities,
 	const ndarray_view<2, real>& output_min_disparities,
@@ -182,7 +132,8 @@ void compute_min_max_disparities(
 
 
 void process_scale(
-	const ndarray_view<3, real>& output_epi_disparities // [v][u][s]
+	const ndarray_view<3, real>& output_epi_disparities, // [v][u][s]
+	bool last
 ) {
 	// compute edge confidence, and min+max disparities for all epis
 	std::cout << "computing edge confidence, min+max disparities for all epi..." << std::endl;
@@ -192,12 +143,19 @@ void process_scale(
 	ndarray<3, real> epi_min_disparities(epis.shape());
 	ndarray<3, real> epi_max_disparities(epis.shape());
 	
+	if(last) {
+		std::fill(epi_edge_confidences.begin(), epi_edge_confidences.end(), INFINITY);
+		std::fill(epi_edge_confidence_masks.begin(), epi_edge_confidence_masks.end(), 0xff);
+	}
+	
 	#pragma omp parallel for
 	for(std::ptrdiff_t v = 0; v < v_sz; ++v) {
 		std::cout << '.' << std::flush;
-		epi_edge_confidences[v] = edge_confidence(epis[v], 8);
-		epi_edge_confidence_masks[v] = edge_confidence_mask(epi_edge_confidences[v], 7e3);
-		
+		if(! last) {
+			epi_edge_confidences[v] = edge_confidence(epis[v], 8);
+			epi_edge_confidence_masks[v] = edge_confidence_mask(epi_edge_confidences[v], 7e3);
+		}
+			
 		compute_min_max_disparities(output_epi_disparities[v], epi_min_disparities[v], epi_max_disparities[v]);
 	}
 	std::cout << std::endl;
@@ -220,12 +178,17 @@ void process_scale(
 		// estimate disparities+confidences for epi line (v,s)
 		if(epi_loaded_lines[v][s].load()) return;
 		
-		
+		ndarray<2, bool> mask(epi_shp);
+		for(auto it = mask.begin(); it != mask.end(); ++it) {
+			auto coord = it.coordinates();
+			*it = epi_edge_confidence_masks[v].at(coord) && std::isnan(output_epi_disparities[v].at(coord));
+		}
+						
 		epi_line_disparity_result res = estimate_epi_line_disparity(
 			s,
 			epis[v],
 			epi_edge_confidences[v].slice(s, 1),
-			epi_edge_confidence_masks[v].slice(s, 1),
+			mask.slice(s, 1),
 			epi_min_disparities[v].slice(s, 1),
 			epi_max_disparities[v].slice(s, 1)
 		);
@@ -240,17 +203,17 @@ void process_scale(
 	// refine and propagate estimated disparities for all epis
 	// write into output_disparities (function argument)
 	std::cout << "processing epis..." << std::endl;
-	#pragma omp parallel for
+	#pragma omp parallel for schedule(dynamic)
 	for(std::ptrdiff_t v = 0; v < v_sz; ++v) {
 		// for epi line (v,s) refine estimated disparities using bilateral median over v and u
 		// then propagate each disparity pixel over the epi by drawing line segment in output_disparities
 		// repeat for different s, until output_disparities is filled (except for low epi_confidences[v][u][s] pixels)
-		std::cout << "epi v=" << v << std::endl;
+		std::cout << char('A' + v*('Z'-'A')/v_sz) << std::flush;
 		
-		ndarray_view<2, real> output_disparities = output_epi_disparities[v];
-		ndarray_view<2, rgb_color> epi = epis[v];
-		ndarray_view<2, real> disparities = epi_disparities[v];
-		ndarray_view<2, real> confidences = epi_confidences[v];
+		ndarray_view<2, real> output_disparities = output_epi_disparities[v]; // [u][s]
+		ndarray_view<2, rgb_color> epi = epis[v]; // [u][s]
+		ndarray_view<2, real> disparities = epi_disparities[v]; // [u][s] (NAN when low confidence, or when already in output_disparities from previous call)
+		ndarray_view<2, real> confidences = epi_confidences[v]; // [u][s]
 		
 		// holes = output_disparities pixels that still need to be filled
 		// masked pixels (= low confidence) don't count as holes
@@ -271,8 +234,6 @@ void process_scale(
 		
 		bool finished = false;
 		while(! finished) {
-			std::cout << "   line s=" << s << std::endl;
-			
 			// need disparities+confidences values for all line s, on window of neighboring epis
 			for(std::ptrdiff_t v2 = std::max<std::ptrdiff_t>(v - bilateral_window_rad, 0);
 				v2 < std::min<std::ptrdiff_t>(v + bilateral_window_rad, v_sz);
@@ -320,7 +281,7 @@ void process_scale(
 				// until color in epi becomes too different
 				auto propagate = [&](std::ptrdiff_t s2) {
 					Assert_crit(s2 != s);
-					std::ptrdiff_t u2 = u  + (s - s2)*d;
+					std::ptrdiff_t u2 = u  + (s - s2)*d/scale_down_factor;
 					if(u2 < 0 || u2 >= u_sz) return false;
 					if(1||color_diff(epi[u2][s2], avg_color) < 100.0) {
 						if(std::isnan(output_disparities[u2][s2])) {
@@ -365,15 +326,103 @@ void process_scale(
 		*/
 		
 	}
-
+	std::cout << std::endl;
 }
 
 
-void add_to_final_epi_disparities(const ndarray<3, real>& scaled_epi_disparities) {
+void scale_down() {
+	// scale down in u and v directions by factor 2 (downsample images)
+	
+	std::ptrdiff_t scaled_u_sz = u_sz / 2;
+	std::ptrdiff_t scaled_v_sz = v_sz / 2;
+	
+	ndarray<3, rgb_color> scaled_epis(make_ndsize(scaled_v_sz, scaled_u_sz, s_sz));
+	
+	// downsample images
 	#pragma omp parallel for
 	for(std::ptrdiff_t s = 0; s < s_sz; ++s) {
-		ndarray<2, real> scaled_disparity_image = scaled_epi_disparities.slice(s, 2);
+		ndarray<2, rgb_color> img(epis.slice(s, 2));
 		
+		cv::Mat_<rgb_color> img_cv = to_opencv(img.view());
+		cv::GaussianBlur(img_cv, img_cv, cv::Size(15, 15), 0.0, 0.0, cv::BORDER_DEFAULT);
+		
+		cv::Mat_<rgb_color> scaled_img_cv;
+		cv::resize(img_cv, scaled_img_cv, cv::Size(scaled_u_sz, scaled_v_sz), 0.0, 0.0, cv::INTER_LINEAR);
+		
+		ndarray_view<2, rgb_color> scaled_img = to_ndarray_view<2, rgb_color>(scaled_img_cv);
+		scaled_epis.slice(s, 2) = scaled_img;
+	}
+	
+	// update global values, and move in new epis cube
+	scale_down_factor *= 2;
+	u_sz = scaled_u_sz;
+	v_sz = scaled_v_sz;
+	epis = std::move(scaled_epis);
+	epi_shp = make_ndsize(u_sz, s_sz);
+	image_shp = make_ndsize(u_sz, v_sz);
+}
+
+
+void scale_down_epi_disparities(
+	const ndarray_view<3, real>& previous_epi_disparities, // [v][u][s] with previous size
+	const ndarray_view<3, real>& output_scaled_epi_disparities // [v][u][s] with new (half) size
+) {
+	// out.u_sz = prev.u_sz / 2  -->  prev.u_sz = 2*out.u_sz  OR  2*out.u+1
+	// out.v_sz = prev.v_sz / 2
+	
+	bool odd_v = (output_scaled_epi_disparities.shape()[0] > 2*previous_epi_disparities.shape()[0]);
+	bool odd_u = (output_scaled_epi_disparities.shape()[1] > 2*previous_epi_disparities.shape()[1]);
+	
+	std::ptrdiff_t scaled_v_sz = output_scaled_epi_disparities.shape()[0];
+	std::ptrdiff_t scaled_u_sz = output_scaled_epi_disparities.shape()[1];
+	
+	// downsample the estimated disparities
+	#pragma omp parallel for
+	for(std::ptrdiff_t s = 0; s < s_sz; ++s) {
+		for(std::ptrdiff_t v = 0; v < scaled_v_sz; ++v) {
+			bool no_v = odd_v && (v == scaled_v_sz-1);
+			for(std::ptrdiff_t u = 0; u < scaled_u_sz; ++u) {
+				bool no_u = odd_u && (u == scaled_u_sz-1);
+				real d1 = previous_epi_disparities[2*v][2*u][s];
+				real d2 = no_u ? NAN : previous_epi_disparities[2*v][2*u+1][s];
+				real d3 = no_v ? NAN : previous_epi_disparities[2*v+1][2*u][s];
+				real d4 = (no_u || no_v) ? NAN : previous_epi_disparities[2*v+1][2*u+1][s];
+				
+				real min_d = d1;
+				if(! std::isnan(d1)) min_d = d1;
+				else if(! std::isnan(d2)) min_d = d2;
+				else if(! std::isnan(d3)) min_d = d3;
+				else if(! std::isnan(d4)) min_d = d4;
+				/*
+				real min_d = d1;
+				if(d2 < min_d) min_d = d2; // comparison false if d2 and/or min_d is NAN
+				if(d3 < min_d) min_d = d3;
+				if(d4 < min_d) min_d = d4;
+				*/
+				output_scaled_epi_disparities[v][u][s] = min_d;
+			}
+		}
+	}
+}
+
+
+void add_to_final_epi_disparities(const ndarray_view<3, real>& scaled_epi_disparities) {
+	#pragma omp parallel for
+	for(std::ptrdiff_t s = 0; s < s_sz; ++s) {
+		//if(s==s_sz/2) reals_export(scaled_epi_disparities.slice(s,2), "../output/part_m"+std::to_string(scale_down_factor)+"_s"+std::to_string(s)+".png");
+		
+		cv::Mat_<real> final_cv, scaled_cv;
+		copy_to_opencv(final_epi_disparities.slice(s, 2), final_cv);
+		copy_to_opencv(scaled_epi_disparities.slice(s, 2), scaled_cv);
+		
+		cv::Mat_<uchar> mask_cv = (final_cv != final_cv); // 1 for NAN pixels
+
+		cv::resize(scaled_cv, scaled_cv, cv::Size(final_u_sz, final_v_sz), 0.0, 0.0, cv::INTER_NEAREST);
+		scaled_cv.copyTo(final_cv, mask_cv);
+		
+		copy_to_ndarray_view(final_cv, final_epi_disparities.slice(s, 2));
+		
+		//if(s==s_sz/2) reals_export(final_epi_disparities.slice(s, 2), "../output/full_m"+std::to_string(scale_down_factor)+"_s"+std::to_string(s)+".png");
 	}
 }
 
@@ -383,30 +432,32 @@ int main() {
 	std::cout << "loading epis..." << std::endl;
 	for(int s = 0; s < s_sz; ++s) epis.slice(s, 2) = load_image(s).array_view();
 
+	std::fill(final_epi_disparities.begin(), final_epi_disparities.end(), NAN);
+	
 	ndarray<3, real> epi_disparities(make_ndsize(v_sz, u_sz, s_sz));
 	std::fill(epi_disparities.begin(), epi_disparities.end(), NAN);
 	
 	std::cout << "***** first run: scale 1" << std::endl;
-	process_scale(epi_disparities.view());
+	process_scale(epi_disparities.view(), false);
 	
-	final_epi_disparities.assign(epi_disparities);
+	final_epi_disparities.assign(epi_disparities.view());
 	
 	while(u_sz > 10 || v_sz > 10) {
+		bool last = !((u_sz > 20) && (v_sz > 20));
+		
 		scale_down();
-		std::cout << "***** next run: scale " << scale_down_factor << std::endl;
+		std::cout << "***** next run: scale " << scale_down_factor << ", shape " << epi_shp << std::endl;
 		
 		ndarray<3, real> scaled_epi_disparities(make_ndsize(v_sz, u_sz, s_sz));
-		scale_down_epi_disparities(epi_disparities, scaled_epi_disparities);
+		scale_down_epi_disparities(epi_disparities.view(), scaled_epi_disparities.view());
 		
-		process_scale(scaled_epi_disparities);
+		process_scale(scaled_epi_disparities.view(), last);
 		
 		epi_disparities = std::move(scaled_epi_disparities);
-		add_to_final_epi_disparities(epi_disparities);
+		add_to_final_epi_disparities(epi_disparities.view());
 	}
 	
 	
-	for(std::ptrdiff_t s = 0; s < s_sz; ++s) {
-		ndarray_view<2, real> disparity_image = final_epi_disparities.slice(s, 2);
-		reals_export(disparity_image, "../output/disp_"+std::to_string(s)+".png");
-	}
+	for(std::ptrdiff_t s = 0; s < s_sz; s += s_sz/20)
+		reals_export(final_epi_disparities.slice(s,2), "../output/disp_"+std::to_string(s)+".png");
 }

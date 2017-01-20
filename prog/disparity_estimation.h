@@ -30,7 +30,7 @@ epi_line_disparity_result estimate_epi_line_disparity(
 	std::ptrdiff_t s,
 	const ndarray_view<2, rgb_color>& epi,
 	const ndarray_view<1, real>& conf,
-	const ndarray_view<1, std::uint8_t>& mask,
+	const ndarray_view<1, bool>& mask,
 	const ndarray_view<1, real>& min_disparity,
 	const ndarray_view<1, real>& max_disparity
 );
