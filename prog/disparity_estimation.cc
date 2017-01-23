@@ -13,6 +13,18 @@
 namespace mf {
 
 namespace {
+	std::ofstream confidences_log_;
+	std::mutex mut_;
+
+	void log_confidence_(real conf) {
+		std::lock_guard<std::mutex> lock(mut_);
+		if(! confidences_log_.is_open()) confidences_log_.open("../output/conf.dat");
+		confidences_log_ << conf << '\n';
+	}
+}
+
+/*
+namespace {
 	cl::Context cl_context;
 
 	void setup_cl_context_() {
@@ -30,37 +42,8 @@ namespace {
 		assert(res == CL_SUCCESS);
 	}
 }
-
-
-epi_line_disparity_result estimate_epi_line_disparity(
-	std::ptrdiff_t s,
-	const ndarray_view<2, rgb_color>& epi,
-	const ndarray_view<1, real>& conf,
-	const ndarray_view<1, bool>& mask,
-	const ndarray_view<1, real>& min_disparity,
-	const ndarray_view<1, real>& max_disparity
-) {
-	static bool context_was_setup_ = false;
-	if(! context_was_setup_) {
-		setup_cl_context_();
-		context_was_setup_ = true;
-	}
-	
-	
-}
-
-/*
-	ptrdiff_t s,
-	float d_min,
-	float d_incr,
-	read_only image2d_t epi,
-	global float* max_scores,
-	global float* max_score_disparities,
-	global float* avg_scores,
-	local float* u_scores
 */
 
-/*
 real depth_score(const ndarray_view<2, rgb_color>& epi, std::ptrdiff_t s, std::ptrdiff_t u, real d) {
 	std::vector<rgb_color> colors;
 	colors.reserve(s_sz);
@@ -72,14 +55,17 @@ real depth_score(const ndarray_view<2, rgb_color>& epi, std::ptrdiff_t s, std::p
 	}
 
 	auto kernel = [](real x) -> real {
-		const real h = 0.02;
+		const real h = depth_score_color_threshold;
 		real q = x / h;
-		if(std::abs(q) <= 1.0) return sq(1.0 - q);
+		if(q <= 1.0) return sq(1.0 - q);
 		else return 0.0;
 	};
 	
 	real score = 0.0;
+	
 	rgb_color col = epi[u][s];
+	
+	
 	for(const rgb_color& col2 : colors) score += kernel(color_diff(col, col2));
 	score /= colors.size();
 	
@@ -104,8 +90,8 @@ epi_line_disparity_result estimate_epi_line_disparity(
 			continue;
 		}
 		
-		real d_incr = disparity_increment;
 		real min_d = min_disparity[u], max_d = max_disparity[u];
+		real d_incr = (max_d - min_d) / disparity_steps;
 		Assert_crit(! std::isnan(min_d));
 		Assert_crit(! std::isnan(max_d));
 		
@@ -126,10 +112,11 @@ epi_line_disparity_result estimate_epi_line_disparity(
 		
 		result.disparity[u] = max_score_d;
 		result.confidence[u] = conf[u] * std::abs(max_score - avg_score);
+		//log_confidence_(result.confidence[u]);
 	}
 	
 	return result;
 }
-*/
+
 
 }

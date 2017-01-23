@@ -1,14 +1,3 @@
-#include <iostream>
-#include <string>
-#include <vector>
-#include <sstream>
-#include <iomanip>
-#include <algorithm>
-#include <fstream>
-#include <mutex>
-#include <shared_mutex>
-#include <atomic>
-
 #include "nd.h"
 #include "image/image.h"
 #include "io/image_import.h"
@@ -22,19 +11,30 @@
 #include "sparse_epi.h"
 #include "disparity_estimation.h"
 
-using namespace mf;
+#include <iostream>
+#include <string>
+#include <vector>
+#include <sstream>
+#include <iomanip>
+#include <algorithm>
+#include <fstream>
+#include <mutex>
+#include <shared_mutex>
+#include <atomic>
+#include <stack>
+#include <cstdio>
 
+using namespace mf;
 
 real epi_disparity_median(
 	ndarray_view<2, rgb_color> colors, // [v][u]
 	ndarray_view<2, real> disparities, // [v][u]
 	ndarray_view<2, real> confidences, // [v][u]
-	std::ptrdiff_t u, std::ptrdiff_t v,
-	std::ptrdiff_t rad,
-	real color_diff_threshold,
-	real confidence_threshold
+	std::ptrdiff_t u, std::ptrdiff_t v
 ) {
 	Assert_crit(! std::isnan(disparities[v][u]));
+	
+	const std::ptrdiff_t rad = bilateral_window_rad;
 	
 	std::vector<real> median_disparities;
 	median_disparities.reserve(sq(2*rad + 1));
@@ -47,9 +47,9 @@ real epi_disparity_median(
 	for(std::ptrdiff_t u2 = u2_begin; u2 < u2_end; ++u2) {
 		for(std::ptrdiff_t v2 = v2_begin; v2 < v2_end; ++v2) {
 			real d = disparities[v2][u2];
-			if(confidences[v2][u2] <= confidence_threshold) continue;
+			if(confidences[v2][u2] <= bileratal_window_confidence_threshold) continue;
 			Assert_crit(! std::isnan(d));
-			if(color_diff(colors[v][u], colors[v2][u2]) > color_diff_threshold) continue;
+			if(color_diff(colors[v][u], colors[v2][u2]) > bilateral_window_color_threshold) continue;
 			
 			median_disparities.push_back(d);
 		}
@@ -152,8 +152,8 @@ void process_scale(
 	for(std::ptrdiff_t v = 0; v < v_sz; ++v) {
 		std::cout << '.' << std::flush;
 		if(! last) {
-			epi_edge_confidences[v] = edge_confidence(epis[v], 8);
-			epi_edge_confidence_masks[v] = edge_confidence_mask(epi_edge_confidences[v], 7e3);
+			epi_edge_confidences[v] = edge_confidence(epis[v]);
+			epi_edge_confidence_masks[v] = edge_confidence_mask(epi_edge_confidences[v]);
 		}
 			
 		compute_min_max_disparities(output_epi_disparities[v], epi_min_disparities[v], epi_max_disparities[v]);
@@ -208,7 +208,8 @@ void process_scale(
 		// for epi line (v,s) refine estimated disparities using bilateral median over v and u
 		// then propagate each disparity pixel over the epi by drawing line segment in output_disparities
 		// repeat for different s, until output_disparities is filled (except for low epi_confidences[v][u][s] pixels)
-		std::cout << char('A' + v*('Z'-'A')/v_sz) << std::flush;
+		std::cout << '.' << std::flush;
+		//std::cout << char('A' + v*('Z'-'A')/v_sz) << std::flush;
 		
 		ndarray_view<2, real> output_disparities = output_epi_disparities[v]; // [u][s]
 		ndarray_view<2, rgb_color> epi = epis[v]; // [u][s]
@@ -234,6 +235,8 @@ void process_scale(
 		
 		bool finished = false;
 		while(! finished) {
+		//	std::cout << "  line " << s << std::endl;
+			
 			// need disparities+confidences values for all line s, on window of neighboring epis
 			for(std::ptrdiff_t v2 = std::max<std::ptrdiff_t>(v - bilateral_window_rad, 0);
 				v2 < std::min<std::ptrdiff_t>(v + bilateral_window_rad, v_sz);
@@ -254,8 +257,8 @@ void process_scale(
 				{
 					std::shared_lock<std::shared_timed_mutex> lock(epi_loaded_lines_mutex);
 					
-					// skip low confidence pixels
-					if(confidences[u][s] <= segment_confidence_threshold) {
+					// skip low confidence pixels (except on last scale)
+					if(confidences[u][s] <= confidence_threshold && !last) {
 						line_remaining_holes[s]--; // skipped low confidence pixels don't count as holes
 						continue;
 					}
@@ -264,8 +267,7 @@ void process_scale(
 					// refine disparity d = [u][s]
 					d = epi_disparity_median(
 						epis.slice(s, 2), epi_disparities.slice(s, 2), epi_confidences.slice(s, 2),
-						u, v,
-						bilateral_window_rad, 100.0, 100.0
+						u, v
 					);
 					Assert_crit(! std::isnan(d));
 				}
@@ -283,7 +285,7 @@ void process_scale(
 					Assert_crit(s2 != s);
 					std::ptrdiff_t u2 = u  + (s - s2)*d/scale_down_factor;
 					if(u2 < 0 || u2 >= u_sz) return false;
-					if(1||color_diff(epi[u2][s2], avg_color) < 100.0) {
+					if(color_diff(epi[u2][s2], avg_color) <= propagation_color_threshold) {
 						if(std::isnan(output_disparities[u2][s2])) {
 							line_remaining_holes[s2]--;
 							output_disparities[u2][s2] = d;
@@ -297,7 +299,9 @@ void process_scale(
 				};
 				for(std::ptrdiff_t s2 = s + 1; s2 < s_sz; ++s2) if(! propagate(s2)) break;
 				for(std::ptrdiff_t s2 = s - 1; s2 >= 0; --s2) if(! propagate(s2)) break;
-
+				
+			
+				
 				// TODO create sparse epi
 			}
 			
@@ -317,14 +321,16 @@ void process_scale(
 			Assert_crit(finished || line_remaining_holes[s] > 0);
 		}
 		
-		
-		//reals_export(output_disparities, "../output/new_disparities_" + std::to_string(v) + ".png");
-		
 		/*
-		ndarray<2, rgb_color> re_epi = sparse_epis[v].reconstruct();
-		image_export(make_image_view(re_epi.view()), "../output/re_epi" + std::to_string(v) + ".png");
+		reals_export(epi_edge_confidences[v], "../output/ec"+std::to_string(v)+"_edge_conf.png");
+		image_export(make_image_view(epi_edge_confidence_masks[v]), "../output/ecm"+std::to_string(v)+"_edge_confm.png");
+		reals_export(epi_confidences[v], "../output/c"+std::to_string(v)+"_conf.png");
+		reals_export(epi_disparities[v], "../output/d"+std::to_string(v)+"_disp.png", true);
+		reals_export(output_disparities, "../output/rd"+std::to_string(v)+"_refined_disp.png", true);
+		image_export(make_image_view(epi), "../output/e"+std::to_string(v)+"_epi.png");
 		*/
 		
+		//std::terminate();
 	}
 	std::cout << std::endl;
 }
@@ -344,7 +350,7 @@ void scale_down() {
 		ndarray<2, rgb_color> img(epis.slice(s, 2));
 		
 		cv::Mat_<rgb_color> img_cv = to_opencv(img.view());
-		cv::GaussianBlur(img_cv, img_cv, cv::Size(15, 15), 0.0, 0.0, cv::BORDER_DEFAULT);
+		//cv::GaussianBlur(img_cv, img_cv, cv::Size(15, 15), 0.0, 0.0, cv::BORDER_DEFAULT);
 		
 		cv::Mat_<rgb_color> scaled_img_cv;
 		cv::resize(img_cv, scaled_img_cv, cv::Size(scaled_u_sz, scaled_v_sz), 0.0, 0.0, cv::INTER_LINEAR);
@@ -389,16 +395,10 @@ void scale_down_epi_disparities(
 				real d4 = (no_u || no_v) ? NAN : previous_epi_disparities[2*v+1][2*u+1][s];
 				
 				real min_d = d1;
-				if(! std::isnan(d1)) min_d = d1;
-				else if(! std::isnan(d2)) min_d = d2;
-				else if(! std::isnan(d3)) min_d = d3;
-				else if(! std::isnan(d4)) min_d = d4;
-				/*
-				real min_d = d1;
 				if(d2 < min_d) min_d = d2; // comparison false if d2 and/or min_d is NAN
 				if(d3 < min_d) min_d = d3;
 				if(d4 < min_d) min_d = d4;
-				*/
+
 				output_scaled_epi_disparities[v][u][s] = min_d;
 			}
 		}
@@ -406,58 +406,105 @@ void scale_down_epi_disparities(
 }
 
 
-void add_to_final_epi_disparities(const ndarray_view<3, real>& scaled_epi_disparities) {
+void scale_up_and_merge_epi_disparities(
+	const ndarray_view<3, real>& smaller_epi_disparities, // [v][u][s]
+	const ndarray_view<3, real>& larger_epi_disparities // [v][u][s]
+) {
 	#pragma omp parallel for
 	for(std::ptrdiff_t s = 0; s < s_sz; ++s) {
-		//if(s==s_sz/2) reals_export(scaled_epi_disparities.slice(s,2), "../output/part_m"+std::to_string(scale_down_factor)+"_s"+std::to_string(s)+".png");
+		cv::Mat_<real> smaller_cv, larger_cv;
+		copy_to_opencv(smaller_epi_disparities.slice(s, 2), smaller_cv);
+		copy_to_opencv(larger_epi_disparities.slice(s, 2), larger_cv);
 		
-		cv::Mat_<real> final_cv, scaled_cv;
-		copy_to_opencv(final_epi_disparities.slice(s, 2), final_cv);
-		copy_to_opencv(scaled_epi_disparities.slice(s, 2), scaled_cv);
+		cv::Mat_<uchar> mask_cv = (larger_cv != larger_cv); // 1 for NAN pixels
+		cv::resize(smaller_cv, smaller_cv, larger_cv.size(), 0.0, 0.0, cv::INTER_NEAREST);
+		smaller_cv.copyTo(larger_cv, mask_cv);
 		
-		cv::Mat_<uchar> mask_cv = (final_cv != final_cv); // 1 for NAN pixels
-
-		cv::resize(scaled_cv, scaled_cv, cv::Size(final_u_sz, final_v_sz), 0.0, 0.0, cv::INTER_NEAREST);
-		scaled_cv.copyTo(final_cv, mask_cv);
-		
-		copy_to_ndarray_view(final_cv, final_epi_disparities.slice(s, 2));
-		
-		//if(s==s_sz/2) reals_export(final_epi_disparities.slice(s, 2), "../output/full_m"+std::to_string(scale_down_factor)+"_s"+std::to_string(s)+".png");
+		copy_to_ndarray_view(larger_cv, larger_epi_disparities.slice(s, 2));
 	}
+}
+
+
+void export_epi_disparities(const ndarray_view<3, real>& vw, const std::string& filename) {
+	Assert(vw.has_default_strides_without_padding());
+	std::ofstream stream(filename, std::ios::binary);
+	stream.write(reinterpret_cast<const std::ofstream::char_type*>(vw.start()), vw.size()*sizeof(real));
+}
+
+tff::ndarray<3, real> import_epi_disparities(const ndsize<3>& sz, const std::string& filename, bool remove = false) {
+	tff::ndarray<3, real> arr(sz);
+	{
+		std::ifstream stream(filename, std::ios::binary);
+		stream.read(reinterpret_cast<std::ofstream::char_type*>(arr.start()), arr.size()*sizeof(real));
+	}
+	if(remove) std::remove(filename.c_str());
+	return arr;
 }
 
 
 int main() {
 	// load all images/epis in memory
-	std::cout << "loading epis..." << std::endl;
+	std::cout << "## loading epis..." << std::endl;
 	for(int s = 0; s < s_sz; ++s) epis.slice(s, 2) = load_image(s).array_view();
-
-	std::fill(final_epi_disparities.begin(), final_epi_disparities.end(), NAN);
 	
 	ndarray<3, real> epi_disparities(make_ndsize(v_sz, u_sz, s_sz));
 	std::fill(epi_disparities.begin(), epi_disparities.end(), NAN);
 	
-	std::cout << "***** first run: scale 1" << std::endl;
-	process_scale(epi_disparities.view(), false);
+	std::stack<ndsize<3>> pyramid_sizes;
 	
-	final_epi_disparities.assign(epi_disparities.view());
-	
-	while(u_sz > 10 || v_sz > 10) {
+	std::cout << "## down" << std::endl;
+	while(u_sz > 10 && v_sz > 10) {
+		std::cout << "***** scale " << scale_down_factor << ", shape " << epi_shp << std::endl;
 		bool last = !((u_sz > 20) && (v_sz > 20));
+		if(last) std::cout << "(last)" << std::endl;
+		pyramid_sizes.push(make_ndsize(v_sz, u_sz, s_sz));
 		
+		std::cout << "** processing epi disparities" << std::endl;
+		process_scale(epi_disparities.view(), last);
+		reals_export(epi_disparities.slice(s_sz/2,2), "../output/scale"+std::to_string(scale_down_factor)+"_disp.png");
+		
+		std::cout << "** scaling down" << std::endl;
 		scale_down();
-		std::cout << "***** next run: scale " << scale_down_factor << ", shape " << epi_shp << std::endl;
 		
+		std::cout << "** preparing scaled epi disparities" << std::endl;
 		ndarray<3, real> scaled_epi_disparities(make_ndsize(v_sz, u_sz, s_sz));
 		scale_down_epi_disparities(epi_disparities.view(), scaled_epi_disparities.view());
 		
-		process_scale(scaled_epi_disparities.view(), last);
+		std::cout << "** exporting previous epi disparities" << std::endl;
+		export_epi_disparities(epi_disparities.view(), "../output/epi_disparities_"+std::to_string(scale_down_factor/2)+".dat");
 		
 		epi_disparities = std::move(scaled_epi_disparities);
-		add_to_final_epi_disparities(epi_disparities.view());
 	}
 	
 	
-	for(std::ptrdiff_t s = 0; s < s_sz; s += s_sz/20)
-		reals_export(final_epi_disparities.slice(s,2), "../output/disp_"+std::to_string(s)+".png");
+	
+	std::size_t scale_back_up_factor = scale_down_factor;
+	
+	ndarray<3, real> smaller_epi_disparities = std::move(epi_disparities);
+
+	std::cout << "## up" << std::endl;
+	while(scale_back_up_factor != 1) {
+		scale_back_up_factor /= 2;
+		
+		ndsize<3> larger_shp = pyramid_sizes.top();
+
+		std::cout << "smaller: " << smaller_epi_disparities.shape() << ", larger: " << larger_shp << std::endl;
+		pyramid_sizes.pop();
+		
+		std::cout << "** importing larger" << std::endl;
+		tff::ndarray<3, real> larger_epi_disparities =
+			import_epi_disparities(larger_shp, "../output/epi_disparities_"+std::to_string(scale_back_up_factor)+".dat");
+		
+		std::cout << "** upscale and merge" << std::endl;
+		scale_up_and_merge_epi_disparities(smaller_epi_disparities.view(), larger_epi_disparities.view());
+	
+		reals_export(larger_epi_disparities.slice(s_sz/2,2), "../output/scale"+std::to_string(scale_back_up_factor)+"_dispMg.png");
+		
+		smaller_epi_disparities = std::move(larger_epi_disparities);
+	}
+	
+	
+	
+	//for(std::ptrdiff_t s = 0; s < s_sz; s += s_sz/20)
+	//	reals_export(final_epi_disparities.slice(s,2), "../output/final/final_disp_"+std::to_string(s)+".png");
 }

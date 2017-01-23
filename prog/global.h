@@ -13,11 +13,23 @@
 namespace mf {
 
 // configuration
-constexpr std::ptrdiff_t bilateral_window_rad = 5;
-constexpr real segment_confidence_threshold = 0.0;
+constexpr std::ptrdiff_t edge_confidence_rad = 5;
+constexpr real edge_confidence_threshold = 0.002;
+
 constexpr real minimal_disparity = 0.0;
 constexpr real maximal_disparity = 2.0;
-constexpr real disparity_increment = 0.01;
+constexpr real disparity_steps = 50;
+
+constexpr real depth_score_color_threshold = 0.3;
+
+constexpr std::ptrdiff_t bilateral_window_rad = 8;
+constexpr real bilateral_window_color_threshold = 0.1;
+constexpr real bileratal_window_confidence_threshold = 0.01;
+
+constexpr real confidence_threshold = 0.002;
+
+constexpr real propagation_color_threshold = 0.05;
+
 
 // dimensions
 extern const std::ptrdiff_t final_u_sz;

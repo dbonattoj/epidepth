@@ -8,8 +8,8 @@
 
 namespace mf {
 
-ndarray<2, real> edge_confidence(const ndarray_view<2, rgb_color>& epi, std::ptrdiff_t radius);
-ndarray<2, std::uint8_t> edge_confidence_mask(const ndarray_view<2, real>& conf, real threshold);
+ndarray<2, real> edge_confidence(const ndarray_view<2, rgb_color>& epi);
+ndarray<2, std::uint8_t> edge_confidence_mask(const ndarray_view<2, real>& conf);
 
 }
 
