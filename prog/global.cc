@@ -2,13 +2,25 @@
 
 namespace mf {
 
-namespace {
-	const std::size_t image_count = 39;
-	const ndsize<2> image_shape = make_ndsize(864, 486);
-	const ndsize<3> imc_shp = ndcoord_cat(image_count, image_shape);
-}
+
+/*
+const char* image_path_format = "../data/2016-07-26-rectified-kinect-parallel/Output%d.jpg";
+const std::size_t image_count = 40;
+const ndsize<2> image_shape = make_ndsize(864, 486);
+*/
+
+/*
+const char* image_path_format = "../data/couch_image-raw_scaled/couch_image-raw_%04d.jpg";
+const std::size_t image_count = 50;
+const ndsize<2> image_shape = make_ndsize(816, 544);
+*/
+
+const char* image_path_format = "../data/mansion/mansion_image_%04d.jpg";
+const std::size_t image_count = 100;
+const ndsize<2> image_shape = make_ndsize(769, 483);
 
 
+const ndsize<3> imc_shp = ndcoord_cat(image_count, image_shape);
 const std::ptrdiff_t final_u_sz = imc_shp[1];
 const std::ptrdiff_t final_v_sz = imc_shp[2];
 std::ptrdiff_t u_sz = final_u_sz;

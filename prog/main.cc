@@ -68,14 +68,12 @@ real epi_disparity_median(
 
 
 image<rgb_color> load_image(std::ptrdiff_t s) {
-	const std::string images_dir = "../data/2016-07-26-rectified-kinect-parallel/";
+	constexpr std::size_t image_path_buffer_size = 256;
+	char image_path_buffer[image_path_buffer_size];
+	
+	std::snprintf(image_path_buffer, image_path_buffer_size, image_path_format, (int)s);
 
-	std::ostringstream str;
-	str << images_dir << "Output" << s << ".jpg";
-	//str << images_dir << "Kinect_color_" << std::setw(6) << std::setfill('0') << i << "_000.png";
-	std::string filename = str.str();
-
-	image<rgb_color> orig_img = mf::image_import(filename);
+	image<rgb_color> orig_img = mf::image_import(image_path_buffer);
 	image<rgb_color> img(flip(image_shp));
 	cv::resize(orig_img.cv_mat(), img.cv_mat(), cv::Size(image_shp[0], image_shp[1]), 0.0, 0.0, cv::INTER_LINEAR);
 
@@ -174,6 +172,8 @@ void process_scale(
 	std::fill(epi_confidences.begin(), epi_confidences.end(), NAN);
 	std::fill(epi_loaded_lines.begin(), epi_loaded_lines.end(), false);
 	
+	std::mutex sparse_epis_mutex;
+	
 	auto process_epi_line = [&](std::ptrdiff_t v, std::ptrdiff_t s) {
 		// estimate disparities+confidences for epi line (v,s)
 		if(epi_loaded_lines[v][s].load()) return;
@@ -203,8 +203,11 @@ void process_scale(
 	// refine and propagate estimated disparities for all epis
 	// write into output_disparities (function argument)
 	std::cout << "processing epis..." << std::endl;
-	#pragma omp parallel for schedule(dynamic)
-	for(std::ptrdiff_t v = 0; v < v_sz; ++v) {
+	//#pragma omp parallel for schedule(dynamic)
+	std::ptrdiff_t v = 100; if(true) {
+	//for(std::ptrdiff_t v = 0; v < v_sz; ++v) {
+		sparse_epi sparse(epi_shp);
+		
 		// for epi line (v,s) refine estimated disparities using bilateral median over v and u
 		// then propagate each disparity pixel over the epi by drawing line segment in output_disparities
 		// repeat for different s, until output_disparities is filled (except for low epi_confidences[v][u][s] pixels)
@@ -253,7 +256,7 @@ void process_scale(
 				// - if from previous s-iteration: got decremented with depth propagation
 				
 				// refine disparities[u][s], using median filter over neighboring u and v (which were loaded before)
-				real d;
+				real d = epi_disparities[v][u][s];
 				{
 					std::shared_lock<std::shared_timed_mutex> lock(epi_loaded_lines_mutex);
 					
@@ -265,11 +268,11 @@ void process_scale(
 					Assert_crit(! std::isnan(disparities[u][s])); // if NAN only if confidences == 0.0
 					
 					// refine disparity d = [u][s]
-					d = epi_disparity_median(
+					/*d = epi_disparity_median(
 						epis.slice(s, 2), epi_disparities.slice(s, 2), epi_confidences.slice(s, 2),
 						u, v
 					);
-					Assert_crit(! std::isnan(d));
+					Assert_crit(! std::isnan(d));*/
 				}
 				
 				// fill this pixel
@@ -297,12 +300,16 @@ void process_scale(
 						return false;
 					}
 				};
-				for(std::ptrdiff_t s2 = s + 1; s2 < s_sz; ++s2) if(! propagate(s2)) break;
-				for(std::ptrdiff_t s2 = s - 1; s2 >= 0; --s2) if(! propagate(s2)) break;
+				//for(std::ptrdiff_t s2 = s + 1; s2 < s_sz; ++s2) if(! propagate(s2)) break;
+				//for(std::ptrdiff_t s2 = s - 1; s2 >= 0; --s2) if(! propagate(s2)) break;
 				
-			
 				
-				// TODO create sparse epi
+				sparse_epi_segment seg{ d, u, s, avg_color };
+				sparse.add_segment(seg);
+				{
+					std::lock_guard<std::mutex> lock(sparse_epis_mutex);
+					final_sparse_epis[v] = sparse;
+				}
 			}
 			
 			Assert_crit(line_remaining_holes[s] <= 0);
@@ -310,7 +317,7 @@ void process_scale(
 			// repeat with s set to the closest (lower or higher) for which line_remaining_holes[s] > 0
 			// stop if none such exists
 			std::ptrdiff_t lower_s, higher_s;
-			for(lower_s = mid_s - 1; lower_s >= 0; lower_s--) if(line_remaining_holes[lower_s] > 0) break;
+			for(lower_s = mid_s - 1;  lower_s >= 0; lower_s--) if(line_remaining_holes[lower_s] > 0) break;
 			for(higher_s = mid_s + 1; higher_s < s_sz; higher_s++) if(line_remaining_holes[higher_s] > 0) break;
 			if(lower_s == -1 && higher_s == s_sz) finished = true;
 			else if(lower_s == -1) s = higher_s;
@@ -321,18 +328,33 @@ void process_scale(
 			Assert_crit(finished || line_remaining_holes[s] > 0);
 		}
 		
-		/*
-		reals_export(epi_edge_confidences[v], "../output/ec"+std::to_string(v)+"_edge_conf.png");
-		image_export(make_image_view(epi_edge_confidence_masks[v]), "../output/ecm"+std::to_string(v)+"_edge_confm.png");
-		reals_export(epi_confidences[v], "../output/c"+std::to_string(v)+"_conf.png");
-		reals_export(epi_disparities[v], "../output/d"+std::to_string(v)+"_disp.png", true);
-		reals_export(output_disparities, "../output/rd"+std::to_string(v)+"_refined_disp.png", true);
-		image_export(make_image_view(epi), "../output/e"+std::to_string(v)+"_epi.png");
-		*/
+		
+		//reals_export(epi_edge_confidences[v], "../output/ec"+std::to_string(v)+".png");
+		//image_export(make_image_view(epi_edge_confidence_masks[v]), "../output/ecm"+std::to_string(v)+".png");
+		//reals_export(epi_confidences[v], "../output/c"+std::to_string(v)+".png");
+		//reals_export(epi_disparities[v], "../output/d"+std::to_string(v)+".png", true);
+		//reals_export(output_disparities, "../output/dr"+std::to_string(v)+".png", true);
+		//image_export(make_image_view(epi), "../output/e"+std::to_string(v)+".png");
+		//image_export(make_image_view(final_sparse_epis[v].reconstruct().view()), "../output/es"+std::to_string(v)+".png");
+		
 		
 		//std::terminate();
 	}
 	std::cout << std::endl;
+	
+	reals_export(epi_disparities.slice(s_sz/2,2), "../output/disp.png", maximal_disparity);
+	reals_export(output_epi_disparities.slice(s_sz/2,2), "../output/rdisp.png", maximal_disparity);
+	reals_export(epi_confidences.slice(s_sz/2,2), "../output/conf.png");
+
+//	std::ptrdiff_t v = 100;
+	reals_export(epi_edge_confidences[v], "../output/ec"+std::to_string(v)+".png");
+	image_export(make_image_view(epi_edge_confidence_masks[v]), "../output/ecm"+std::to_string(v)+".png");
+	reals_export(epi_confidences[v], "../output/c"+std::to_string(v)+".png");
+	reals_export(epi_disparities[v], "../output/d"+std::to_string(v)+".png", maximal_disparity);
+	reals_export(output_epi_disparities[v], "../output/dr"+std::to_string(v)+".png", maximal_disparity);
+	image_export(make_image_view(epis[v]), "../output/e"+std::to_string(v)+".png");
+	image_export(make_image_view(final_sparse_epis[v].reconstruct().view()), "../output/es"+std::to_string(v)+".png");
+
 }
 
 
@@ -449,6 +471,8 @@ int main() {
 	
 	ndarray<3, real> epi_disparities(make_ndsize(v_sz, u_sz, s_sz));
 	std::fill(epi_disparities.begin(), epi_disparities.end(), NAN);
+
+	final_sparse_epis = std::vector<sparse_epi>(v_sz, sparse_epi(epi_shp));
 	
 	std::stack<ndsize<3>> pyramid_sizes;
 	
@@ -461,7 +485,8 @@ int main() {
 		
 		std::cout << "** processing epi disparities" << std::endl;
 		process_scale(epi_disparities.view(), last);
-		reals_export(epi_disparities.slice(s_sz/2,2), "../output/scale"+std::to_string(scale_down_factor)+"_disp.png");
+		
+		break;
 		
 		std::cout << "** scaling down" << std::endl;
 		scale_down();
@@ -471,12 +496,21 @@ int main() {
 		scale_down_epi_disparities(epi_disparities.view(), scaled_epi_disparities.view());
 		
 		std::cout << "** exporting previous epi disparities" << std::endl;
-		export_epi_disparities(epi_disparities.view(), "../output/epi_disparities_"+std::to_string(scale_down_factor/2)+".dat");
+		//export_epi_disparities(epi_disparities.view(), "../output/epi_disparities_"+std::to_string(scale_down_factor/2)+".dat");
 		
 		epi_disparities = std::move(scaled_epi_disparities);
 	}
 	
+	ndarray<2, rgb_color> recons(image_shp);
+	for(std::ptrdiff_t v = 0; v < v_sz; ++v) {
+		ndarray<2, rgb_color> epi = final_sparse_epis[v].reconstruct();
+		constexpr std::ptrdiff_t s = 30;
+		recons.slice(v, 1) = epi.slice(s, 1);
+	}
+	image_export(image<rgb_color>(flip(recons.view())).view(), "../output/recons.png");
 	
+	
+	return 0;
 	
 	std::size_t scale_back_up_factor = scale_down_factor;
 	

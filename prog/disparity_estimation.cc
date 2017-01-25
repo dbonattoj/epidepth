@@ -9,17 +9,25 @@
 #include <cassert>
 #include <fstream>
 #include <streambuf>
+#include "io/image_export.h"
 
 namespace mf {
 
 namespace {
 	std::ofstream confidences_log_;
+	std::ofstream scores_log_;
 	std::mutex mut_;
 
 	void log_confidence_(real conf) {
 		std::lock_guard<std::mutex> lock(mut_);
 		if(! confidences_log_.is_open()) confidences_log_.open("../output/conf.dat");
 		confidences_log_ << conf << '\n';
+	}
+
+	void log_score_(real sc) {
+		std::lock_guard<std::mutex> lock(mut_);
+		if(! scores_log_.is_open()) scores_log_.open("../output/score.dat");
+		scores_log_ << sc << '\n';
 	}
 }
 
@@ -49,7 +57,8 @@ real depth_score(const ndarray_view<2, rgb_color>& epi, std::ptrdiff_t s, std::p
 	colors.reserve(s_sz);
 		
 	for(std::ptrdiff_t s2 = 0; s2 < epi.shape()[1]; ++s2) {
-		std::ptrdiff_t u2 = u  + (s - s2)*d/scale_down_factor;
+		real dv = d * scale_down_factor;
+		std::ptrdiff_t u2 = u  + (s - s2)*dv;
 		if(u2 < 0 || u2 >= u_sz) continue;
 		colors.push_back(epi[u2][s2]);
 	}
@@ -65,9 +74,25 @@ real depth_score(const ndarray_view<2, rgb_color>& epi, std::ptrdiff_t s, std::p
 	
 	rgb_color col = epi[u][s];
 	
-	
+	/*
+	double colf[3] = { col.r, col.g, col.b };
+	for(std::ptrdiff_t j = 0; j < 10; ++j) {
+		double num[3] = {0.0, 0.0, 0.0};
+		double den = 0.0;
+		for(const rgb_color& col2 : colors) {
+			double diff = color_diff(col, col2);
+			for(std::ptrdiff_t i = 0; i < 3; ++i) num[i] += diff * colf[i];
+			den += diff;
+		}
+		for(std::ptrdiff_t i = 0; i < 3; ++i) colf[i] = num[i] / den;
+	};
+	col = rgb_color(std::min(colf[0], 255.0), std::min(colf[1], 255.0), std::min(colf[2], 255.0));
+	*/
+	 
 	for(const rgb_color& col2 : colors) score += kernel(color_diff(col, col2));
 	score /= colors.size();
+	
+	log_score_(score);
 	
 	return score;
 };
@@ -82,7 +107,8 @@ epi_line_disparity_result estimate_epi_line_disparity(
 	const ndarray_view<1, real>& max_disparity
 ) {
 	epi_line_disparity_result result(u_sz, s);
-	
+
+	#pragma omp parallel for
 	for(std::ptrdiff_t u = 0; u < u_sz; ++u) {
 		if(! mask[u]) {
 			result.confidence[u] = 0.0;
@@ -109,10 +135,28 @@ epi_line_disparity_result estimate_epi_line_disparity(
 			}
 		}
 		avg_score /= n_scores;
+
+		static bool first=true;
+		if(first && max_score_d > 3.5 && s < 90 && s < 95 && same(epi, epis[100])) {
+			for(std::ptrdiff_t s2 = 0; s2 < epi.shape()[1]; ++s2) {
+				real dv = max_score_d * scale_down_factor;
+				std::ptrdiff_t u2 = u  + (s - s2)*dv;
+					std::cout << make_ndptrdiff(u2,s2) << std::endl;
+				if(u2 < 0 || u2 >= u_sz) continue;
+				epi[u2][s2] = rgb_color(255,0,0);
+			}
+			epi[u][s] = rgb_color(0,0,255);
+			//first = false;
+			std::cout << max_score_d << ": " << max_score << std::endl;
+			
+			image_export(make_image_view(epi), "../output/epi.png");
+			scores_log_.close();
+			//std::terminate();
+		}
 		
 		result.disparity[u] = max_score_d;
 		result.confidence[u] = conf[u] * std::abs(max_score - avg_score);
-		//log_confidence_(result.confidence[u]);
+		log_confidence_(result.confidence[u]);
 	}
 	
 	return result;

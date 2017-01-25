@@ -32,7 +32,7 @@ ndarray<2, real> edge_confidence(const ndarray_view<2, rgb_color>& epi) {
 			real diff_sum = 0.0;
 			for(std::ptrdiff_t u2 = u_begin; u2 < u_end; ++u2)
 				diff_sum += color_diff(epi_line[u], epi_line[u2]);
-			conf[u][s] = sq(diff_sum) / (u_end - u_begin);
+			conf[u][s] = diff_sum / (u_end - u_begin);
 			//log_edge_confidence_(conf[u][s]);
 		}
 	}
@@ -46,8 +46,9 @@ ndarray<2, std::uint8_t> edge_confidence_mask(const ndarray_view<2, real>& conf)
 	cv::Mat_<real> conf_cv = to_opencv(conf);
 	cv::Mat_<uchar> mask_cv = to_opencv(mask.view());
 	
-	cv::Mat_<uchar> kernel_cv = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(3,3));
-	cv::morphologyEx((conf_cv > edge_confidence_threshold), mask_cv, cv::MORPH_ERODE, kernel_cv);
+	cv::Mat_<uchar> kernel_cv = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(1, edge_confidence_mask_width));
+	cv::morphologyEx((conf_cv > edge_confidence_mask_min_threshold), mask_cv, cv::MORPH_DILATE, kernel_cv);
+	//mask_cv = (conf_cv > edge_confidence_mask_min_threshold);
 	
 	return mask;
 }

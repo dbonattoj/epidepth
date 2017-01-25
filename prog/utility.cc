@@ -3,6 +3,12 @@
 
 namespace mf {
 
+void reals_export(const ndarray_view<2, real>& vw, const std::string& filename, real max_value) {
+	ndarray<2, real> arr(vw);
+	for(real& x : arr) if(std::isnan(x)) x = 0.0;
+	image_export(make_image_view(arr.view()), filename, 0.0, max_value);
+}
+
 void reals_export(const ndarray_view<2, real>& vw, const std::string& filename, bool zero) {
 	ndarray<2, real> arr(vw);
 	real min_x = -1.0;
@@ -17,7 +23,14 @@ void reals_export(const ndarray_view<1, real>& vw, const std::string& filename, 
 	const std::ptrdiff_t h = 100;
 	ndarray<2, real> arr(make_ndsize(vw.shape()[0], h));
 	for(std::ptrdiff_t y = 0; y < h; ++y) arr.slice(y, 1) = vw;
-	reals_export(arr.view(), filename, zero);
+	reals_export(arr.view(), filename);
+}
+
+void reals_export(const ndarray_view<1, real>& vw, const std::string& filename, real max_value) {
+	const std::ptrdiff_t h = 100;
+	ndarray<2, real> arr(make_ndsize(vw.shape()[0], h));
+	for(std::ptrdiff_t y = 0; y < h; ++y) arr.slice(y, 1) = vw;
+	reals_export(arr.view(), filename, max_value);
 }
 
 }
