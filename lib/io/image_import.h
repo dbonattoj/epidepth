@@ -27,7 +27,7 @@ OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
 
 namespace mf {
 
-image<rgb_color> image_import(const std::string& filename);
+image<rgba_color> image_import(const std::string& filename);
 
 }
 

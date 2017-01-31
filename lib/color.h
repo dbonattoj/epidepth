@@ -27,75 +27,36 @@ OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
 namespace mf {
 
 
-/// RGB color, 8 bit.
-struct rgb_color {
-	rgb_color() = default;
-	rgb_color(std::uint8_t nr, std::uint8_t ng, std::uint8_t nb) :
-		r(nr), g(ng), b(nb) { }
+struct rgba_color {
+	rgba_color() = default;
+	rgba_color(std::uint8_t nr, std::uint8_t ng, std::uint8_t nb, std::uint8_t na = 255) :
+		r(nr), g(ng), b(nb), a(na) { }
 	
-	rgb_color(const rgb_color&) = default;
-	rgb_color& operator=(const rgb_color&) = default;
+	rgba_color(const rgba_color&) = default;
+	rgba_color& operator=(const rgba_color&) = default;
 	
 	
 	std::uint8_t r; // red
 	std::uint8_t g; // green
 	std::uint8_t b; // blue
+	std::uint8_t a; // alpha
 	
-	const static rgb_color black;
-	const static rgb_color white;
+	const static rgba_color black;
+	const static rgba_color white;
 };
 
-bool operator==(const rgb_color& a, const rgb_color& b);
-bool operator!=(const rgb_color& a, const rgb_color& b);
 
+inline bool operator==(const rgba_color& a, const rgba_color& b) {
+	return (a.r == b.r) && (a.g == b.g) && (a.b == b.b) && (a.a == b.a);
+}
 
-/// YCbCr color, 8 bit.
-struct alignas(4) ycbcr_color {
-	ycbcr_color() = default;
-	ycbcr_color(std::uint8_t ny, std::uint8_t ncr, std::uint8_t ncb) :
-		y(ny), cr(ncr), cb(ncb) { }
-	
-	ycbcr_color(const ycbcr_color&) = default;
-	ycbcr_color& operator=(const ycbcr_color&) = default;
+inline bool operator!=(const rgba_color& a, const rgba_color& b) {
+	return (a.r != b.r) || (a.g != b.g) || (a.b != b.b) || (a.a != b.a);
+}
 
-	std::uint8_t y;  // luma, Y'
-	std::uint8_t cr; // chroma-red, U
-	std::uint8_t cb; // chroma-blue, V
-};
-
-bool operator==(const ycbcr_color& a, const ycbcr_color& b);
-bool operator!=(const ycbcr_color& a, const ycbcr_color& b);
-
-
-
-/// Color conversion, specialized for different color formats.
-template<typename Output, typename Input>
-Output color_convert(const Input&);
-
-template<> rgb_color color_convert(const ycbcr_color&);
-template<> ycbcr_color color_convert(const rgb_color&);
-
-
-/// Color blend.
-rgb_color color_blend(const rgb_color& a, const rgb_color& b);
-rgb_color color_blend(const rgb_color& a, real a_weight, const rgb_color& b, real b_weight);
+rgba_color color_blend(const rgba_color& a, const rgba_color& b, real k);
 
 }
 
-
-#include "nd.h"
-
-namespace tff {
-
-/// Color `elem_traits` specializations.
-template<>
-struct elem_traits<mf::rgb_color> :
-	elem_traits_base<mf::rgb_color, std::uint8_t, 3, false> { };
-	
-template<>
-struct elem_traits<mf::ycbcr_color> :
-	elem_traits_base<mf::ycbcr_color, std::uint8_t, 3, false> { };
-
-}
 
 #endif

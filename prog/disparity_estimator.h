@@ -1,33 +1,30 @@
-/*
 #ifndef MF_DISPARITY_ESTIMATOR_H_
 #define MF_DISPARITY_ESTIMATOR_H_
 
-#include "opencl.h"
+#include "common.h"
+#include "global.h"
 #include "nd.h"
+#include "opencv.h"
 
 namespace mf {
 
+struct epi_line_disparity_result {
+	ndarray<1, real> disparity;
+	ndarray<1, real> confidence;
+	
+	epi_line_disparity_result() :
+		disparity(make_ndsize(u_sz)),
+		confidence(make_ndsize(u_sz)) { }
+};
+
+
 class disparity_estimator {
-private:
-	cl::CommandQueue& queue_;
-	
 public:
-	explicit disparity_estimator(
-		const ndarray_view<2, rgb_color>& epi,
-		const ndarray_view<2, real>& conf,
-		const ndarray_view<2, bool>& mask,
-		const ndarray_view<2, real>& min_disparity,
-		const ndarray_view<2, real>& max_disparity,
-		
-		const ndarray_view<2, real> output_disparity,
-		const ndarray_view<2, real> output_confidence
-	);
-	
-	void enqueue_epi_line_disparity(std::ptrdiff_t s);
-	
+	virtual ~disparity_estimator();
+	virtual epi_line_disparity_result estimate_epi_line_disparity
+		(std::ptrdiff_t v, std::ptrdiff_t s, const ndarray_view<1, uchar>& mask) = 0;
 };
 
 };
 
 #endif
-*/

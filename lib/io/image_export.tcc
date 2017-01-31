@@ -34,17 +34,17 @@ inline void imwrite_cv(const std::string& filename, const cv::Mat& mat) {
 
 }
 	
-inline void image_export(const image_view<rgb_color>& img, const std::string& filename) {
+inline void image_export(const image_view<rgba_color>& img, const std::string& filename) {
 	cv::Mat output_img;
-	cv::cvtColor(img.cv_mat(), output_img, CV_RGB2BGR);
+	cv::cvtColor(img.cv_mat(), output_img, CV_RGBA2BGR);
 	detail::imwrite_cv(filename, output_img);
 }
 
 
 template<typename Mask>
-void image_export(const masked_image_view<rgb_color, Mask>& img, const std::string& filename) {
+void image_export(const masked_image_view<rgba_color, Mask>& img, const std::string& filename) {
 	cv::Mat output_img, holes;
-	cv::cvtColor(img.cv_mat(), output_img, CV_RGB2BGRA);
+	cv::cvtColor(img.cv_mat(), output_img, CV_RGBA2BGRA);
 	cv::bitwise_not(img.cv_mask_mat(), holes);
 	output_img.setTo(cv::Scalar::all(0), holes);
 	detail::imwrite_cv(filename, output_img);
@@ -52,10 +52,10 @@ void image_export(const masked_image_view<rgb_color, Mask>& img, const std::stri
 
 
 template<typename Mask>
-void image_export(const masked_image_view<rgb_color, Mask>& img, const std::string& filename, const rgb_color& background) {
-	cv::Scalar cv_background(background.b, background.g, background.r);
+void image_export(const masked_image_view<rgba_color, Mask>& img, const std::string& filename, const rgba_color& background) {
+	cv::Scalar cv_background(background.b, background.g, background.r, background.a);
 	cv::Mat output_img, holes;
-	cv::cvtColor(img.cv_mat(), output_img, CV_RGB2BGR);
+	cv::cvtColor(img.cv_mat(), output_img, CV_RGBA2BGRA);
 	cv::bitwise_not(img.cv_mask_mat(), holes);
 	output_img.setTo(cv_background, holes);
 	detail::imwrite_cv(filename, output_img);
@@ -64,16 +64,16 @@ void image_export(const masked_image_view<rgb_color, Mask>& img, const std::stri
 
 template<typename Scalar, typename Mask>
 std::enable_if_t<std::is_arithmetic<Scalar>::value> image_export
-	(const masked_image_view<Scalar, Mask>& img, const std::string& filename, Scalar min_value, Scalar max_value, const rgb_color& background)
+	(const masked_image_view<Scalar, Mask>& img, const std::string& filename, Scalar min_value, Scalar max_value, const rgba_color& background)
 {
 	cv::Mat output_img;
 	double alpha = 255.0 / (max_value - min_value);
 	double beta = alpha * min_value;
 	img.cv_mat().convertTo(output_img, CV_8U, alpha, beta);
 	
-	cv::Scalar cv_background(background.b, background.g, background.r);
+	cv::Scalar cv_background(background.b, background.g, background.r, background.a);
 	cv::Mat output_rgb_img, holes;
-	cv::cvtColor(output_img, output_rgb_img, CV_GRAY2RGB);
+	cv::cvtColor(output_img, output_rgb_img, CV_GRAY2RGBA);
 	cv::bitwise_not(img.cv_mask_mat(), holes);
 	output_rgb_img.setTo(cv_background, holes);
 	detail::imwrite_cv(filename, output_rgb_img);
@@ -83,7 +83,7 @@ std::enable_if_t<std::is_arithmetic<Scalar>::value> image_export
 
 template<typename Scalar, typename Mask>
 std::enable_if_t<std::is_arithmetic<Scalar>::value> image_export
-	(const masked_image_view<Scalar, Mask>& img, const std::string& filename, const rgb_color& background)
+	(const masked_image_view<Scalar, Mask>& img, const std::string& filename, const rgba_color& background)
 {
 	cv::Point min_pos, max_pos;
 	cv::minMaxLoc(img.cv_mat(), NULL, NULL, &min_pos, &max_pos, img.cv_mask_mat());

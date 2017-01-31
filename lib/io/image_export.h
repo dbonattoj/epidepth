@@ -29,21 +29,21 @@ OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
 
 namespace mf {
 
-void image_export(const image_view<rgb_color>&, const std::string& filename);
+void image_export(const image_view<rgba_color>&, const std::string& filename);
 
 template<typename Mask>
-void image_export(const masked_image_view<rgb_color, Mask>&, const std::string& filename);
+void image_export(const masked_image_view<rgba_color, Mask>&, const std::string& filename);
 
 template<typename Mask>
-void image_export(const masked_image_view<rgb_color, Mask>&, const std::string& filename, const rgb_color& background);
+void image_export(const masked_image_view<rgba_color, Mask>&, const std::string& filename, const rgba_color& background);
 
 template<typename Scalar, typename Mask>
 std::enable_if_t<std::is_arithmetic<Scalar>::value> image_export
-	(const masked_image_view<Scalar, Mask>&, const std::string& filename, Scalar min_value, Scalar max_value, const rgb_color& background);
+	(const masked_image_view<Scalar, Mask>&, const std::string& filename, Scalar min_value, Scalar max_value, const rgba_color& background);
 
 template<typename Scalar, typename Mask>
 std::enable_if_t<std::is_arithmetic<Scalar>::value> image_export
-	(const masked_image_view<Scalar, Mask>&, const std::string& filename, const rgb_color& background);
+	(const masked_image_view<Scalar, Mask>&, const std::string& filename, const rgba_color& background);
 
 template<typename Scalar, typename Mask>
 std::enable_if_t<std::is_arithmetic<Scalar>::value> image_export

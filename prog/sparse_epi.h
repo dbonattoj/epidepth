@@ -12,7 +12,7 @@ struct sparse_epi_segment {
 	real d;
 	std::ptrdiff_t u;
 	std::ptrdiff_t s;
-	rgb_color avg_color;
+	rgba_color avg_color;
 };
 
 class sparse_epi {
@@ -24,7 +24,8 @@ public:
 	explicit sparse_epi(const ndsize<2>& shp) : shape_(shp) { }
 	
 	void add_segment(const sparse_epi_segment& seg);
-	ndarray<2, rgb_color> reconstruct() const;
+	ndarray<2, rgba_color> reconstruct() const;
+	ndarray<1, rgba_color> reconstruct_line(real s) const;
 };
 
 }

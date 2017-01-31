@@ -25,36 +25,19 @@ OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
 #include <algorithm>
 
 #include "color.h"
-#include "nd/ndcoord.h"
-#include "nd/ndarray.h"
+#include "nd.h"
 
 namespace cv { // in OpenCV namespace
 	template<>
-	class DataType<::mf::rgb_color> {
+	class DataType<::mf::rgba_color> {
 	public:
-		using value_type = mf::rgb_color;
+		using value_type = mf::rgba_color;
 		using work_type = int;
 		using channel_type = uchar;
 		enum {
 			generic_type = 0,
 			depth = DataDepth<channel_type>::value,
-			channels = 3,
-			fmt = ((channels - 1)<<8) + DataDepth<channel_type>::fmt,
-			type = CV_MAKETYPE(depth, channels)
-		};
-		using vec_type = Vec<channel_type, channels>;
-	};
-	
-	template<>
-	class DataType<::mf::ycbcr_color> {
-	public:
-		using value_type = mf::ycbcr_color;
-		using work_type = int;
-		using channel_type = uchar;
-		enum {
-			generic_type = 0,
-			depth = DataDepth<channel_type>::fmt,
-			channels = 3,
+			channels = 4,
 			fmt = ((channels - 1)<<8) + DataDepth<channel_type>::fmt,
 			type = CV_MAKETYPE(depth, channels)
 		};

@@ -22,10 +22,10 @@ namespace {
 	}
 }
 
-ndarray<2, real> edge_confidence(const ndarray_view<2, rgb_color>& epi) {
+ndarray<2, real> edge_confidence(const ndarray_view<2, rgba_color>& epi) {
 	ndarray<2, real> conf(epi_shp);
 	for(std::ptrdiff_t s = 0; s < s_sz; ++s) {
-		ndarray_view<1, rgb_color> epi_line = epi.slice(s, 1);
+		ndarray_view<1, rgba_color> epi_line = epi.slice(s, 1);
 		for(std::ptrdiff_t u = 0; u < u_sz; ++u) {
 			std::ptrdiff_t u_begin = (u > edge_confidence_rad ? u - edge_confidence_rad : u);
 			std::ptrdiff_t u_end = (u < epi.shape()[0]-edge_confidence_rad ? u + edge_confidence_rad : epi.shape()[0]);

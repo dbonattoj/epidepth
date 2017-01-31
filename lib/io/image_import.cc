@@ -23,10 +23,10 @@ OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
 
 namespace mf {
 
-image<rgb_color> image_import(const std::string& filename) {
+image<rgba_color> image_import(const std::string& filename) {
 	cv::Mat img = cv::imread(filename, CV_LOAD_IMAGE_COLOR);
-	cv::cvtColor(img, img, CV_BGR2RGB);
-	return image<rgb_color>(img);
+	cv::cvtColor(img, img, CV_BGR2RGBA);
+	return image<rgba_color>(img);
 }
 
 }
